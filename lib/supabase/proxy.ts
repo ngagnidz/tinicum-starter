@@ -57,6 +57,7 @@ export async function updateSession(request: NextRequest) {
     // open rather than gated behind login.
     !request.nextUrl.pathname.startsWith("/api/extract") &&
     !request.nextUrl.pathname.startsWith("/api/match") &&
+    !request.nextUrl.pathname.startsWith("/api/vendor-email") &&
     !request.nextUrl.pathname.startsWith("/runs")
   ) {
     // no user, potentially respond by redirecting the user to the login page

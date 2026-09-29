@@ -13,10 +13,15 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 
-type Phase = "idle" | "uploading" | "uploaded" | "extracting" | "done";
+type Phase =
+  | "idle"
+  | "uploading"
+  | "uploaded"
+  | "extracting"
+  | "matching"
+  | "done";
 type Tab = "upload" | "analyze";
 
 interface UploadedFileRow {
@@ -53,6 +58,7 @@ export function UploadForm() {
   const [failures, setFailures] = useState<
     { fileName: string; error: string }[]
   >([]);
+  const [matchError, setMatchError] = useState<string | null>(null);
 
   const distinctPoCount = useMemo(() => {
     if (!csvRows) return 0;
@@ -232,6 +238,21 @@ export function UploadForm() {
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     await createClient().from("runs").update({ status: "extracted" }).eq("id", runId);
+
+    setPhase("matching");
+    setMatchError(null);
+    try {
+      const res = await fetch("/api/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
+      const json = await res.json();
+      if (!json.ok) setMatchError(json.error ?? "Matching failed");
+    } catch (err) {
+      setMatchError(err instanceof Error ? err.message : "Matching failed");
+    }
+
     setPhase("done");
   }
 
@@ -242,37 +263,6 @@ export function UploadForm() {
 
   return (
     <div className="w-full max-w-3xl">
-      {/* Step Indicators */}
-      <div className="flex gap-4 mb-8 items-center justify-center">
-        {[
-          { num: 1, label: "Upload", completed: phase !== "idle" },
-          { num: 2, label: "Extract", completed: phase === "done" },
-          { num: 3, label: "Review matches", completed: false },
-        ].map((step, idx) => (
-          <div key={step.num} className="flex items-center gap-4">
-            <div
-              className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-sm transition-colors animate-slideUp ${
-                step.completed
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-300 text-gray-700"
-              }`}
-              style={{ animationDelay: `${idx * 0.1}s` }}
-            >
-              {step.num}
-            </div>
-            <span
-              className={`text-sm font-medium transition-colors animate-slideUp ${
-                step.completed ? "text-gray-900" : "text-gray-500"
-              }`}
-              style={{ animationDelay: `${idx * 0.1}s` }}
-            >
-              {step.label}
-            </span>
-            {idx < 2 && <div className="w-8 h-0.5 bg-gray-300"></div>}
-          </div>
-        ))}
-      </div>
-
       {/* Tab Navigation */}
       <div className="flex gap-4 mb-6 border-b">
         <button
@@ -303,21 +293,18 @@ export function UploadForm() {
       {/* Upload Tab */}
       {activeTab === "upload" && (
         <div className="flex flex-col gap-6">
-          {/* Open POs Card - Yellow theme */}
-          <Card className="border-0 shadow-sm bg-yellow-50 animate-slideUp">
+          {/* Open POs Card */}
+          <Card className="shadow-sm animate-slideUp">
             <CardHeader className="pb-3">
-              <div className="flex items-center gap-3">
-                <div className="text-2xl">📊</div>
-                <div>
-                  <CardTitle className="text-lg">Open POs</CardTitle>
-                  <CardDescription>
-                    The open_pos.csv export from your ERP.
-                  </CardDescription>
-                </div>
+              <div>
+                <CardTitle className="text-lg">Open POs</CardTitle>
+                <CardDescription>
+                  The open_pos.csv export from your ERP.
+                </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <div className="border-2 border-dashed border-yellow-300 rounded-lg p-8 text-center hover:bg-yellow-100 transition-colors cursor-pointer">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:bg-gray-50 transition-colors cursor-pointer">
                 <input
                   id="csv-input"
                   type="file"
@@ -330,7 +317,6 @@ export function UploadForm() {
                   htmlFor="csv-input"
                   className="cursor-pointer flex flex-col items-center gap-2"
                 >
-                  <div className="text-3xl">📁</div>
                   <div>
                     <p className="font-semibold text-gray-900">
                       Drop the CSV here, or browse
@@ -350,7 +336,7 @@ export function UploadForm() {
                 <p className="text-sm text-red-600">✗ {csvError}</p>
               )}
 
-              <div className="bg-yellow-100 p-3 rounded text-xs text-gray-700">
+              <div className="bg-gray-50 p-3 rounded text-xs text-gray-700">
                 <p className="font-medium mb-1">Required columns:</p>
                 <div className="flex flex-wrap gap-1">
                   {[
@@ -367,7 +353,7 @@ export function UploadForm() {
                   ].map((col) => (
                     <span
                       key={col}
-                      className="bg-white px-2 py-1 rounded border border-yellow-200"
+                      className="bg-white px-2 py-1 rounded border border-gray-200"
                     >
                       {col}
                     </span>
@@ -377,22 +363,19 @@ export function UploadForm() {
             </CardContent>
           </Card>
 
-          {/* Vendor Confirmations Card - Pink theme */}
-          <Card className="border-0 shadow-sm bg-pink-50 animate-slideUp" style={{ animationDelay: '0.1s' }}>
+          {/* Vendor Confirmations Card */}
+          <Card className="shadow-sm animate-slideUp" style={{ animationDelay: '0.1s' }}>
             <CardHeader className="pb-3">
-              <div className="flex items-center gap-3">
-                <div className="text-2xl">📄</div>
-                <div>
-                  <CardTitle className="text-lg">Vendor confirmations</CardTitle>
-                  <CardDescription>
-                    Pick the whole folder or individual PDF files.
-                  </CardDescription>
-                </div>
+              <div>
+                <CardTitle className="text-lg">Vendor confirmations</CardTitle>
+                <CardDescription>
+                  Pick the whole folder or individual PDF files.
+                </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="border-2 border-dashed border-pink-300 rounded-lg p-6 text-center hover:bg-pink-100 transition-colors cursor-pointer">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition-colors cursor-pointer">
                   <input
                     id="pdf-folder-input"
                     type="file"
@@ -406,7 +389,6 @@ export function UploadForm() {
                     htmlFor="pdf-folder-input"
                     className="cursor-pointer flex flex-col items-center gap-2"
                   >
-                    <div className="text-2xl">📁</div>
                     <p className="font-semibold text-gray-900">Choose a folder</p>
                     <p className="text-xs text-gray-600">
                       Everything inside is scanned for PDFs
@@ -414,7 +396,7 @@ export function UploadForm() {
                   </label>
                 </div>
 
-                <div className="border-2 border-dashed border-pink-300 rounded-lg p-6 text-center hover:bg-pink-100 transition-colors cursor-pointer">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition-colors cursor-pointer">
                   <input
                     id="pdf-files-input"
                     type="file"
@@ -428,7 +410,6 @@ export function UploadForm() {
                     htmlFor="pdf-files-input"
                     className="cursor-pointer flex flex-col items-center gap-2"
                   >
-                    <div className="text-2xl">📋</div>
                     <p className="font-semibold text-gray-900">
                       Choose PDF files
                     </p>
@@ -438,7 +419,7 @@ export function UploadForm() {
               </div>
 
               {pdfFiles.length > 0 && (
-                <div className="bg-pink-100 p-3 rounded">
+                <div className="bg-gray-50 p-3 rounded">
                   <p className="text-sm font-medium text-gray-900 mb-2">
                     {pdfFiles.length} PDF{pdfFiles.length === 1 ? "" : "s"} selected
                   </p>
@@ -499,7 +480,7 @@ export function UploadForm() {
       {/* Analyze Tab */}
       {activeTab === "analyze" && phase !== "idle" && phase !== "uploading" && runId && (
         <div className="flex flex-col gap-6 animate-slideUp">
-          <Card className="border-0 shadow-sm bg-blue-50">
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Run {runId.slice(0, 8)}</CardTitle>
               <CardDescription>
@@ -518,18 +499,20 @@ export function UploadForm() {
                 </Button>
               )}
 
-              {(phase === "extracting" || phase === "done") && (
+              {(phase === "extracting" || phase === "matching" || phase === "done") && (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
-                    {phase === "extracting" && (
+                    {(phase === "extracting" || phase === "matching") && (
                       <span className="inline-block w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
                     )}
                     {phase === "done" && <span className="text-2xl">✓</span>}
                     <Progress
                       value={
-                        extractProgress.total === 0
-                          ? 0
-                          : (extractProgress.current / extractProgress.total) * 100
+                        phase === "extracting"
+                          ? extractProgress.total === 0
+                            ? 0
+                            : (extractProgress.current / extractProgress.total) * 100
+                          : 100
                       }
                       className="flex-1"
                     />
@@ -537,9 +520,17 @@ export function UploadForm() {
                   <p className="text-sm text-gray-700 font-medium">
                     {phase === "extracting"
                       ? `Extracting ${extractProgress.current} of ${extractProgress.total}`
-                      : `Extracted ${extractProgress.total - failures.length} of ${extractProgress.total} (${failures.length} failed)`}
+                      : phase === "matching"
+                        ? "Matching confirmations to POs…"
+                        : `Extracted ${extractProgress.total - failures.length} of ${extractProgress.total} (${failures.length} failed)`}
                   </p>
                 </div>
+              )}
+
+              {matchError && (
+                <p className="text-sm text-red-600 font-medium">
+                  Matching failed: {matchError}
+                </p>
               )}
 
               {failures.length > 0 && (
@@ -562,7 +553,7 @@ export function UploadForm() {
                 <Button
                   asChild
                   size="lg"
-                  className="w-full py-6 bg-green-600 hover:bg-green-700 text-base font-semibold"
+                  className="w-full py-6 bg-blue-600 hover:bg-blue-700 text-base font-semibold"
                 >
                   <Link href={`/runs/${runId}/matches`}>View matches</Link>
                 </Button>
