@@ -17,6 +17,89 @@
 </p>
 <br/>
 
+## PO Confirmation Reconciler
+
+This app is built on the starter below. It matches vendor order-confirmation
+PDFs to open purchase orders from a CSV export.
+
+### Env vars
+
+In addition to the two Supabase vars described under
+[Clone and run locally](#clone-and-run-locally), add:
+
+```env
+ANTHROPIC_API_KEY=[your Anthropic API key]
+```
+
+`ANTHROPIC_API_KEY` is read only in `app/api/extract/route.ts` /
+`lib/anthropic/extract-confirmation.ts` (server-side route handlers), never
+sent to the browser. Get a key from the
+[Anthropic Console](https://console.anthropic.com/settings/keys).
+
+No `SUPABASE_SERVICE_ROLE_KEY` is needed: the schema's RLS policies are
+intentionally open (see the note in the migration below), so the existing
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` is enough for both the browser and the
+route handlers.
+
+### Run the migrations
+
+Two migrations, applied in order:
+
+- `20260929145417_po_reconciler_schema.sql` -- `runs`, `po_lines`,
+  `confirmation_files`, `confirmations`, `confirmation_lines`, plus a private
+  `confirmations` Storage bucket.
+- `20260929152455_lean_confirmation_schema.sql` -- replaces `confirmations` /
+  `confirmation_lines` with the leaner extraction shape (one `part_number`
+  instead of a beacon/vendor split, `process_code`, and `promise_date_start`
+  / `promise_date_end` / `promise_basis` / `needs_review` computed by
+  `lib/normalize.ts` from a verbatim `promise_text` rather than asked of the
+  model). It drops and recreates those two tables, which is only safe because
+  at the time it was written they held data from the schema it replaces.
+
+Apply them with the Supabase CLI once it's linked to your project:
+
+```bash
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+
+Or paste the file's contents into the SQL editor in the Supabase dashboard.
+
+This migration is written to be safe to re-run (`create table if not exists`,
+`on conflict do nothing` for the bucket) except for the `create policy`
+statements, which fail if a policy with the same name already exists — drop
+those policies first if you need to re-apply after editing them.
+
+RLS is enabled on every table but the policies allow `anon` and
+`authenticated` to do anything. There's no per-user/tenant model yet, so this
+is intentionally wide open rather than half-gated behind Supabase Auth;
+tighten it before this handles real vendor data. Because of that, the
+`proxy.ts`/`lib/supabase/proxy.ts` auth gate also explicitly exempts
+`/api/extract` and `/runs` so the tool works without signing in.
+
+### Tests
+
+```bash
+npm test
+```
+
+`tests/normalize.test.ts` unit-tests the deterministic date/unit/part-number
+post-processing in `lib/normalize.ts` (no API calls). `tests/extraction.test.ts`
+is a regression suite that calls the real Anthropic API against the six
+reference PDFs in `data/samples/` (one per vendor template) and checks the
+fields called out for each; it needs `ANTHROPIC_API_KEY` and is skipped
+without it.
+
+### Using it
+
+1. Go to `/`, pick `open_pos.csv` and the `confirmations/` folder (or select
+   PDFs individually), then **Upload**.
+2. Click **Run extraction** — it calls `/api/extract` once per PDF and shows
+   progress; failures (bad extraction, non-PDF content, model/schema
+   mismatches) are listed but don't stop the run.
+3. Click **View matches**, or go to `/runs/<run id>/matches`, for the
+   document-level match table.
+
 ## Features
 
 - Works across the entire [Next.js](https://nextjs.org) stack
